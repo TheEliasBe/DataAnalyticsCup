@@ -1,8 +1,10 @@
 import pandas as pd
 from datetime import  datetime
 import matplotlib.pyplot as plt
-import sklearn
-import sklearn.model_selection
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import confusion_matrix
 
 # cant put a try catch block in lambda so here is a named function which does the trick
 def save_division(a, b, c):
@@ -12,20 +14,34 @@ def save_division(a, b, c):
         print(e)
         return c
 # Daten laden
-cols = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "payment_type", "pickup_community_area", "dropoff_community_area"]
+cols = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "payment_type", "pickup_community_area", "dropoff_community_area", "pickup_centroid_latitude", "pickup_centroid_longitude"]
 df = pd.read_csv("train.csv", usecols=cols, delimiter=',')
-df = df.sample(n=5000) # Sample for better performance
+df = df.sample(n=150000) # Sample for better performance
 
-# reformat the time stamp
-remove_alpha = lambda x :( x.replace('T', ' ')).replace('Z','')
-df['trip_start_timestamp'] = df['trip_start_timestamp'].apply(remove_alpha)
-df['trip_start_time'] = df['trip_start_timestamp'].apply(lambda x : x[11:])
-df['trip_start_date'] = df['trip_start_timestamp'].apply(lambda x : x[:10])
+# remove stupid character froms datetieme string
+df['trip_start_timestamp'] = df['trip_start_timestamp'].apply(lambda x :( x.replace('T', ' ')).replace('Z',''))
 
 # is time during rush hour
 # TODO check for public holidays
-is_rush_hour = lambda x : ((datetime.strptime("07:00:00", "%H:%M:%S") < datetime.strptime(x[11:],"%H:%M:%S") < datetime.strptime("09:00:00","%H:%M:%S")) or (datetime.strptime("16:00:00", "%H:%M:%S") < datetime.strptime(x[11:],"%H:%M:%S") < datetime.strptime("18:00:00","%H:%M:%S"))) and not (datetime.strptime(x[:10], "%Y-%m-%d").strftime("%A") is 'Sunday') and not (datetime.strptime(x[:10], "%Y-%m-%d").strftime("%A") is 'Saturday')
-df['in_rush_hour'] = df['trip_start_timestamp'].apply(is_rush_hour)
+# easier to read rush hour checker than the lambda expression. DT has to be a datetime object
+def is_in_rush_hour(dt):
+    if not isinstance(dt, datetime):
+        raise Exception("is_in_rush_hour excepts a datetime object as input")
+
+    if dt.strftime("%A") == 'Sunday' or dt.strftime("%A") == 'Saturday':
+        # saturday and sunday no rush hour
+        return False
+    else:
+        if datetime.strptime("07:00:00", "%H:%M:%S").time() < dt.time() < datetime.strptime("09:00:00", "%H:%M:%S").time():
+            return True
+        elif datetime.strptime("16:00:00", "%H:%M:%S").time() < dt.time() < datetime.strptime("18:00:00", "%H:%M:%S").time():
+            return True
+        else:
+            return False
+
+df['in_rush_hour'] = df['trip_start_timestamp'].apply(lambda d : is_in_rush_hour(datetime.strptime(d, "%Y-%m-%d %H:%M:%S")))
+# now remove trip start timestamp
+df = df.drop(['trip_start_timestamp'], axis=1)
 
 # compute average speed of trip and remove all entries above 120mph
 df['avg_speed'] = df.apply(lambda row: save_division(row['trip_miles'], (row['trip_seconds']+1), 0)*3600, axis=1)
@@ -36,6 +52,12 @@ df = df.drop(df[df['avg_speed']> 120].index)
 df['fare_per_mile'] = df.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
 # df = df.drop(df[df['fare_per_mile'] > 1000.0].index)
 
+# move target value in_rush_hour to the back just for consistency
+df = df[['trip_seconds', 'trip_miles', 'pickup_community_area', 'dropoff_community_area', 'fare', 'payment_type', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'in_rush_hour']]
+
+print("Size before dropping all NA values: ", df.shape)
+df = df.dropna()
+print("Size after dropping all NA values: ", df.shape)
 # split dataset
 x1 = df.loc[df['in_rush_hour'] == True]
 x2 = df.loc[df['in_rush_hour'] == False]
@@ -87,15 +109,54 @@ def plt_fare_per_mile():
     plt.title("Fare Per Mile")
     plt.show()
 
-plt_avg_speed()
-plt_payment_type()
-plt_fare()
-plt_payment_type()
-plt_pickup_community()
-plt_dropoff_community()
-plt_avg_speed()
-plt_fare_per_mile()
+# problem: die farben überdecken sich, daher schwer per Auge einzuschätzen was in welchem Bereich überwieht
+def plt_pickup_coordinates():
+    fig = plt.figure()
+    ax = fig.add_subplot();
+    ax.set_title("Geographic Coordinates")
+    ax.scatter(x2['pickup_centroid_longitude'], x2['pickup_centroid_latitude'], c='b', s=3, alpha=0.5, label="No Rush Hour")
+    ax.scatter(x1['pickup_centroid_longitude'], x1['pickup_centroid_latitude'], c='r', s=3, alpha=0.5,label="Rush Hour")
+    plt.legend(loc='upper right')
+    plt.show()
+
+# plt_avg_speed()
+# plt_payment_type()
+# plt_fare()
+# plt_payment_type()
+# plt_pickup_community()
+# plt_dropoff_community()
+# plt_avg_speed()
+# plt_fare_per_mile()
+# plt_pickup_coordinates()
 
 print("CORRELATION TO IN_RUSH_HOUR BOOLEAN")
+print(df.corr(method='pearson')['in_rush_hour'])
 
-print(df.corr(method='kendall')['in_rush_hour'])
+# normalize the data. some classifier work better on normalized data
+sc = StandardScaler()
+df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']] = sc.fit_transform(df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']])
+
+# encode the payment type as integer
+le = LabelEncoder()
+df['payment_type'] = le.fit_transform(df['payment_type'])
+
+
+# split the data into train and test date
+training_set, validation_set = train_test_split(df, test_size = 0.2, random_state = 21)
+X_train = training_set.iloc[:,0:-1].values
+Y_train = training_set.iloc[:,-1].values
+X_val = validation_set.iloc[:,0:-1].values
+y_val = validation_set.iloc[:,-1].values
+
+# define a measure for accuracy
+def accuracy(confusion_matrix):
+   diagonal_sum = confusion_matrix.trace()
+   sum_of_all_elements = confusion_matrix.sum()
+   return diagonal_sum / sum_of_all_elements
+
+# create the neural network classifier
+classifier = MLPClassifier(hidden_layer_sizes=(150,100,50), max_iter=300, activation = 'relu', solver='adam', random_state=1)
+classifier.fit(X_train, Y_train)
+y_pred = classifier.predict(X_val)
+cm = confusion_matrix(y_pred, y_val)
+print("Accuracy of MLPClassifier : ", accuracy(cm))
