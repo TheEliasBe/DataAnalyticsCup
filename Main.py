@@ -14,9 +14,10 @@ def save_division(a, b, c):
         print(e)
         return c
 # Daten laden
-cols = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "payment_type", "pickup_community_area", "dropoff_community_area", "pickup_centroid_latitude", "pickup_centroid_longitude"]
+# TODO JOIN with CA_DATA
+cols = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "payment_type", "pickup_community_area", "dropoff_community_area", "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude"]
 df = pd.read_csv("train.csv", usecols=cols, delimiter=',')
-df = df.sample(n=150000) # Sample for better performance
+df = df.sample(n=10000) # Sample for better performance
 
 # remove stupid character froms datetieme string
 df['trip_start_timestamp'] = df['trip_start_timestamp'].apply(lambda x :( x.replace('T', ' ')).replace('Z',''))
@@ -32,9 +33,9 @@ def is_in_rush_hour(dt):
         # saturday and sunday no rush hour
         return False
     else:
-        if datetime.strptime("07:00:00", "%H:%M:%S").time() < dt.time() < datetime.strptime("09:00:00", "%H:%M:%S").time():
+        if datetime.strptime("07:00:00", "%H:%M:%S").time() <= dt.time() <= datetime.strptime("09:00:00", "%H:%M:%S").time():
             return True
-        elif datetime.strptime("16:00:00", "%H:%M:%S").time() < dt.time() < datetime.strptime("18:00:00", "%H:%M:%S").time():
+        elif datetime.strptime("16:00:00", "%H:%M:%S").time() <= dt.time() <= datetime.strptime("18:00:00", "%H:%M:%S").time():
             return True
         else:
             return False
@@ -52,8 +53,20 @@ df = df.drop(df[df['avg_speed']> 120].index)
 df['fare_per_mile'] = df.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
 # df = df.drop(df[df['fare_per_mile'] > 1000.0].index)
 
+
+
+
+# all NA community areas set to 0
+df['pickup_community_area'] = df['pickup_community_area'].fillna(0)
+df['dropoff_community_area'] = df['dropoff_community_area'].fillna(0)
+df['pickup_centroid_latitude'] = df['pickup_centroid_latitude'].fillna(0)
+df['pickup_centroid_longitude'] = df['pickup_centroid_longitude'].fillna(0)
+df['dropoff_centroid_latitude'] = df['dropoff_centroid_latitude'].fillna(0)
+df['dropoff_centroid_longitude'] = df['dropoff_centroid_longitude'].fillna(0)
+
 # move target value in_rush_hour to the back just for consistency
-df = df[['trip_seconds', 'trip_miles', 'pickup_community_area', 'dropoff_community_area', 'fare', 'payment_type', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'in_rush_hour']]
+df = df[['trip_seconds', 'trip_miles', 'pickup_community_area', 'dropoff_community_area', 'fare', 'payment_type', "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude", 'avg_speed', 'fare_per_mile', 'in_rush_hour']]
+
 
 print("Size before dropping all NA values: ", df.shape)
 df = df.dropna()
@@ -61,6 +74,7 @@ print("Size after dropping all NA values: ", df.shape)
 # split dataset
 x1 = df.loc[df['in_rush_hour'] == True]
 x2 = df.loc[df['in_rush_hour'] == False]
+
 
 # avg speed ist schon aussagekräftig
 def plt_avg_speed():
@@ -92,9 +106,10 @@ def plt_payment_type():
     plt.show()
 
 def plt_pickup_community():
-    plt.hist([x1['pickup_community_area'], x2['pickup_community_area']], log=True, label=['Rush Hour', 'No Rush Hour'])
+    plt.hist([x1['pickup_community_area'], x2['pickup_community_area']], log=False, bins=77, label=['Rush Hour', 'No Rush Hour'])
     plt.legend(loc='upper right')
     plt.title("Pickup Community Area")
+    plt.xlim(60,77)
     plt.show()
 
 def plt_dropoff_community():
@@ -116,6 +131,20 @@ def plt_pickup_coordinates():
     ax.set_title("Geographic Coordinates")
     ax.scatter(x2['pickup_centroid_longitude'], x2['pickup_centroid_latitude'], c='b', s=3, alpha=0.5, label="No Rush Hour")
     ax.scatter(x1['pickup_centroid_longitude'], x1['pickup_centroid_latitude'], c='r', s=3, alpha=0.5,label="Rush Hour")
+    plt.ylim(41.80,42.05)
+    plt.xlim(-87.70, -87.55)
+    plt.legend(loc='upper right')
+    plt.show()
+
+def plt_pickup_coordinates2():
+    fig = plt.figure()
+    ax = fig.add_subplot();
+    ax.set_title("Geographic Coordinates")
+    ax.scatter(x1['pickup_centroid_longitude'], x1['pickup_centroid_latitude'], c='r', s=3, alpha=0.5, label="Rush Hour")
+    ax.scatter(x2['pickup_centroid_longitude'], x2['pickup_centroid_latitude'], c='b', s=3, alpha=0.5, label="No Rush Hour")
+
+    plt.ylim(41.80,42.05)
+    plt.xlim(-87.70, -87.55)
     plt.legend(loc='upper right')
     plt.show()
 
@@ -123,40 +152,42 @@ def plt_pickup_coordinates():
 # plt_payment_type()
 # plt_fare()
 # plt_payment_type()
-# plt_pickup_community()
+plt_pickup_community()
 # plt_dropoff_community()
 # plt_avg_speed()
 # plt_fare_per_mile()
-# plt_pickup_coordinates()
+plt_pickup_coordinates()
+plt_pickup_coordinates2()
 
-print("CORRELATION TO IN_RUSH_HOUR BOOLEAN")
+# print("CORRELATION TO IN_RUSH_HOUR BOOLEAN")
 print(df.corr(method='pearson')['in_rush_hour'])
-
-# normalize the data. some classifier work better on normalized data
-sc = StandardScaler()
-df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']] = sc.fit_transform(df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']])
-
-# encode the payment type as integer
-le = LabelEncoder()
-df['payment_type'] = le.fit_transform(df['payment_type'])
-
-
-# split the data into train and test date
-training_set, validation_set = train_test_split(df, test_size = 0.2, random_state = 21)
-X_train = training_set.iloc[:,0:-1].values
-Y_train = training_set.iloc[:,-1].values
-X_val = validation_set.iloc[:,0:-1].values
-y_val = validation_set.iloc[:,-1].values
-
-# define a measure for accuracy
-def accuracy(confusion_matrix):
-   diagonal_sum = confusion_matrix.trace()
-   sum_of_all_elements = confusion_matrix.sum()
-   return diagonal_sum / sum_of_all_elements
-
-# create the neural network classifier
-classifier = MLPClassifier(hidden_layer_sizes=(150,100,50), max_iter=300, activation = 'relu', solver='adam', random_state=1)
-classifier.fit(X_train, Y_train)
-y_pred = classifier.predict(X_val)
-cm = confusion_matrix(y_pred, y_val)
-print("Accuracy of MLPClassifier : ", accuracy(cm))
+#
+# # normalize the data. some classifier work better on normalized data
+# sc = StandardScaler()
+# df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']] = sc.fit_transform(df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']])
+#
+# # encode the payment type as integer
+# le = LabelEncoder()
+# df['payment_type'] = le.fit_transform(df['payment_type'])
+#
+#
+# # split the data into train and test date
+# # TODO k-fold cross validation
+# training_set, validation_set = train_test_split(df, test_size = 0.2, random_state = 21)
+# X_train = training_set.iloc[:,0:-1].values
+# Y_train = training_set.iloc[:,-1].values
+# X_val = validation_set.iloc[:,0:-1].values
+# y_val = validation_set.iloc[:,-1].values
+#
+# # define a measure for accuracy
+# def accuracy(confusion_matrix):
+#    diagonal_sum = confusion_matrix.trace()
+#    sum_of_all_elements = confusion_matrix.sum()
+#    return diagonal_sum / sum_of_all_elements
+#
+# # create the neural network classifier
+# classifier = MLPClassifier(hidden_layer_sizes=(150,100,50), max_iter=300, activation = 'relu', solver='adam', random_state=1)
+# classifier.fit(X_train, Y_train)
+# y_pred = classifier.predict(X_val)
+# cm = confusion_matrix(y_pred, y_val)
+# print("Accuracy of MLPClassifier : ", accuracy(cm))
