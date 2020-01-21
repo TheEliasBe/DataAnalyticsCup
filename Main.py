@@ -93,10 +93,18 @@ df = df.astype({'in_rush_hour': 'bool', 'payment_type': 'str'})
 # print("CORRELATION TO IN_RUSH_HOUR BOOLEAN")
 print(df.dtypes)
 corr = df.corr(method='pearson')['in_rush_hour']
-print(corr[abs(corr)>0.03])
-# TODO remove all attributes with |correlation| < 0.03 programmatically
+print(corr[abs(corr) > 0.03])
+print(corr)
+print(df)
+
 # df = df[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'percent_households_below_poverty', 'percent_aged_over_15_unemployed', 'percent_aged_under_18_or_over_64', 'life_expectancy_1990', 'life_expectancy_2000', 'life_expectancy_2010', 'fare_per_mile', 'payment_type', 'in_rush_hour']]
-df = df[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'payment_type', 'in_rush_hour']]
+# df = df[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'payment_type', 'in_rush_hour']]
+
+for name, val in corr.items():
+    if abs(val) < 0.03 and name != 'trip_seconds' and name != 'trip_miles' and name != 'fare' and name != 'avg_speed' \
+            and name != 'fare_per_mile':
+        df.drop(name, axis=1, inplace=True)
+print(df)
 
 # split dataset
 x1 = df.loc[df['in_rush_hour'] == True]
@@ -128,46 +136,82 @@ Y_train = training_set.iloc[:,-1].values
 X_val = validation_set.iloc[:,0:-1].values
 y_val = validation_set.iloc[:,-1].values
 
+
 # define a measure for accuracy
 def accuracy(confusion_matrix):
    diagonal_sum = confusion_matrix.trace()
    sum_of_all_elements = confusion_matrix.sum()
    return diagonal_sum / sum_of_all_elements
 
+
 # create the neural network classifier - returns the numpy array of predicted values
 def mlp(X_train, Y_train, X_val, y_val):
     classifier = MLPClassifier(hidden_layer_sizes=(11,100,100,2), max_iter=300, activation = 'relu', solver='adam', random_state=1)
     classifier.fit(X_train, Y_train)
     y_pred = classifier.predict(X_val)
-    print(y_pred)
+    # print(y_pred)
     cm = confusion_matrix(y_pred, y_val)
     print("Accuracy of MLPClassifier : ", accuracy(cm))
+    evaluation(y_pred, y_val)
     return y_pred
+
 
 # create adaboost classifier
 def ada(X_train, Y_train, X_val, y_val):
     adaClassifier = AdaBoostClassifier(n_estimators=1000, learning_rate=1.0)
     adaClassifier.fit(X_train, Y_train)
     y_ada = adaClassifier.predict(X_val)
-    print(y_ada)
-    print("Accuracy of AdadBoost : ", adaClassifier.score(X_val, y_val))
+    # print(y_ada)
+    print("Accuracy of AdaBoost : ", adaClassifier.score(X_val, y_val))
+    evaluation(y_ada, y_val)
     return y_ada
+
 
 def gradient(X_train, Y_train, X_val, y_val):
     clf = GradientBoostingClassifier(n_estimators=1000, learning_rate=1.0, max_depth=1, random_state=2020)
     clf.fit(X_train, Y_train)
     gradient_boost_predict = clf.predict(X_val)
+    # print(gradient_boost_predict)
     cm = confusion_matrix(gradient_boost_predict, y_val)
     print("Accuracy of Gradient Boost Classifier : ", accuracy(cm))
+    evaluation(gradient_boost_predict, y_val)
     return gradient_boost_predict
+
 
 def blockchain_cloud_ai_predict_algo_top_secret(X_train, Y_train, X_val, y_val):
     y_pred_constant = np.full(y_val.shape, False, dtype=bool)
     cm = confusion_matrix(y_pred_constant, y_val)
     print("Accuracy of Gradient Boost Classifier : ", accuracy(cm))
+    evaluation(y_pred_constant, y_val)
     return y_pred_constant
+
+
+def evaluation(pred, truth):
+    # Sensitivity = True Positive Rate
+    pred = pred.astype(int)
+    truth = truth.astype(int)
+
+    tp = 0
+    tn = 0
+    fn = 0
+    fp = 0
+    for i in range(len(pred)):
+        if pred[i] == truth[i] and pred[i] == 1:
+            tp += 1
+        elif pred[i] == truth[i] and pred[i] == 0:
+            tn += 1
+        elif pred[i] != truth[i] and pred[i] == 1:
+            fp += 1
+        else:
+            fn += 1
+
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (fp + tn)
+    balanced_accuracy = (sensitivity + specificity) / 2
+
+    print("TP: ", tp, " - TN: ", tn, " - FN: ", fn, " - FP: ", fp)
+    print("Evaluation: ", balanced_accuracy)
 
 mlp(X_train, Y_train, X_val, y_val)
 gradient(X_train, Y_train, X_val, y_val)
 ada(X_train, Y_train, X_val, y_val)
-
