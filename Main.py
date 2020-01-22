@@ -8,6 +8,8 @@ from sklearn.metrics import confusion_matrix
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.ensemble import GradientBoostingClassifier
 import numpy as np
+import Plot
+import geopy.distance
 
 # Can't put a try catch block in lambda so here is a named function which does the trick
 def save_division(a, b, c):
@@ -40,7 +42,7 @@ def is_in_rush_hour(dt):
 # Load data
 cols = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "payment_type", "pickup_community_area", "dropoff_community_area", "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude"]
 df = pd.read_csv("train.csv", usecols=cols, delimiter=',')
-df = df.sample(n=1500)
+df = df.sample(n=150000)
 
 # Remove stupid character from datetime string
 df['trip_start_timestamp'] = df['trip_start_timestamp'].apply(lambda x: (x.replace('T', ' ')).replace('Z', ''))
@@ -60,16 +62,7 @@ df_merged = pd.merge(left=df, right=df_ca, left_on=["pickup_community_area"], ri
 # df = df_joined  # this line can easily be made into a comment to test only the original data set
 # ____ CA_data ____
 
-
-# Compute average speed of trip and remove all entries above 120mph
-df['avg_speed'] = df.apply(lambda row: save_division(row['trip_miles'], (row['trip_seconds']+1), 0)*3600, axis=1)
-df = df.drop(df[df['avg_speed']> 120].index)
-
-# Compute fare per mile - maybe in rush hour 1 mile is more expensive, drop every fare >1000$
-# TODO normalize with trip_seconds
-df['fare_per_mile'] = df.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
-# df = df.drop(df[df['fare_per_mile'] > 1000.0].index)
-
+# for all instances with trip_miles = 0
 # All NA community areas set to 0
 df['pickup_community_area'] = df['pickup_community_area'].fillna(0)
 df['dropoff_community_area'] = df['dropoff_community_area'].fillna(0)
@@ -77,6 +70,45 @@ df['pickup_centroid_latitude'] = df['pickup_centroid_latitude'].fillna(0)
 df['pickup_centroid_longitude'] = df['pickup_centroid_longitude'].fillna(0)
 df['dropoff_centroid_latitude'] = df['dropoff_centroid_latitude'].fillna(0)
 df['dropoff_centroid_longitude'] = df['dropoff_centroid_longitude'].fillna(0)
+
+total_direct = 0
+total_driven = 0
+
+def heuristic_number(row):
+    global total_direct, total_driven
+    if row['trip_miles'] > 0 and row['pickup_centroid_latitude'] > 0 and abs(row['dropoff_centroid_latitude']) > 0:
+        total_direct += geopy.distance.geodesic((row["pickup_centroid_latitude"], row["pickup_centroid_longitude"]), (row["dropoff_centroid_latitude"], row['dropoff_centroid_longitude'])).miles
+        total_driven += row['trip_miles']
+        return row['trip_miles']
+    else:
+        return row['trip_miles']
+
+
+def geo_heuristic(row, factor):
+    if row['trip_miles'] == 0:
+        heuristic_distance = geopy.distance.geodesic((row["pickup_centroid_latitude"], row["pickup_centroid_longitude"]), (row["dropoff_centroid_latitude"], row['dropoff_centroid_longitude'])).miles * factor
+        return heuristic_distance
+    else:
+        return row['trip_miles']
+
+
+# compute heurcistic factor
+df['trip_miles']= df.apply(lambda row: heuristic_number(row), axis=1)
+direct_to_driven_factor = total_driven/total_direct
+# apply factor to all trip_miles = 0
+print(df['trip_miles'])
+df['trip_miles']= df.apply(lambda row: geo_heuristic(row, direct_to_driven_factor), axis=1)
+print(df[df['trip_miles']>1000])
+
+# Compute average speed of trip and remove all entries above 120mph
+df['avg_speed'] = df.apply(lambda row: save_division(row['trip_miles'], (row['trip_seconds']+1), 0)*3600, axis=1)
+df = df.drop(df[df['avg_speed']> 120].index)
+print(df['avg_speed'])
+
+# Compute fare per mile - maybe in rush hour 1 mile is more expensive, drop every fare >1000$
+# TODO normalize with trip_seconds
+df['fare_per_mile'] = df.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
+# df = df.drop(df[df['fare_per_mile'] > 1000.0].index)
 
 # Move target value in_rush_hour to the back just for consistency
 # df = df[['trip_seconds', 'trip_miles', 'pickup_community_area', 'dropoff_community_area', 'fare', 'payment_type', "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude", 'avg_speed', 'fare_per_mile', "community_area_number", "percent_of_housing_crowded", "percent_households_below_poverty", "percent_aged_over_15_unemployed", "percent_aged_over_24_without_high_school_diploma", "percent_aged_under_18_or_over_64", "per_capita_income", "hardship_index", "life_expectancy_1990", "life_expectancy_2000", "life_expectancy_2010", "avg_elec_usage_kwh", "avg_gas_usage_therms", "in_rush_hour"]]
@@ -91,11 +123,7 @@ print("Size after dropping all NA values: ", df.shape)
 df = df.astype({'in_rush_hour': 'bool', 'payment_type': 'str'})
 
 # print("CORRELATION TO IN_RUSH_HOUR BOOLEAN")
-print(df.dtypes)
 corr = df.corr(method='pearson')['in_rush_hour']
-print(corr[abs(corr) > 0.03])
-print(corr)
-print(df)
 
 # df = df[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'percent_households_below_poverty', 'percent_aged_over_15_unemployed', 'percent_aged_under_18_or_over_64', 'life_expectancy_1990', 'life_expectancy_2000', 'life_expectancy_2010', 'fare_per_mile', 'payment_type', 'in_rush_hour']]
 # df = df[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'payment_type', 'in_rush_hour']]
@@ -104,11 +132,7 @@ for name, val in corr.items():
     if abs(val) < 0.03 and name != 'trip_seconds' and name != 'trip_miles' and name != 'fare' and name != 'avg_speed' \
             and name != 'fare_per_mile':
         df.drop(name, axis=1, inplace=True)
-print(df)
 
-# split dataset
-x1 = df.loc[df['in_rush_hour'] == True]
-x2 = df.loc[df['in_rush_hour'] == False]
 
 # normalize the data. some classifier work better on normalized data
 sc = StandardScaler()
@@ -131,19 +155,24 @@ df['payment_type'] = le.fit_transform(df['payment_type'])
 #     y_train, y_test = y[train_index], y[test_index]
 
 # load test.csv
-df_test = pd.read_csv('test.csv', usecols=cols)
+# df_test = pd.read_csv('test.csv', usecols=cols)
+#
+# # compute average speed for test data
+# df_test['avg_speed'] = df_test.apply(lambda row: save_division(row['trip_miles'], (row['trip_seconds']+1), 0)*3600, axis=1)
+# df = df.drop(df[df['avg_speed']> 120].index)
+#
+# # compute fare per mile for test data
+# df_test['fare_per_mile'] = df_test.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
+# df_test = df_test[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'payment_type']]
+#
+# # encode labels
+# df_test['payment_type'] = le.fit_transform(df_test['payment_type'])
+# df_test[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']] = sc.fit_transform(df_test[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']])
+# # scale values
+# print("Attributes used for testing : ", df_test.columns)
+# X_test = df_test.to_numpy()
 
-# compute average speed for test data
-df_test['avg_speed'] = df_test.apply(lambda row: save_division(row['trip_miles'], (row['trip_seconds']+1), 0)*3600, axis=1)
-df = df.drop(df[df['avg_speed']> 120].index)
-
-# compute fare per mile for test data
-df_test['fare_per_mile'] = df_test.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
-df_test = df_test[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'payment_type']]
-print("Attributes used for testing : ", df_test.columns)
-X_test = df_test
-
-training_set, validation_set = train_test_split(df, test_size = 0.2, random_state = 21)
+training_set, validation_set = train_test_split(df, test_size = 0.2, random_state = 2020)
 X_train = training_set.iloc[:,0:-1].values
 Y_train = training_set.iloc[:,-1].values
 X_val = validation_set.iloc[:,0:-1].values
@@ -159,16 +188,25 @@ def accuracy(confusion_matrix):
 
 # create the neural network classifier - returns the numpy array of predicted values
 def mlp(X_train, Y_train, X_val, y_val, training):
-    classifier = MLPClassifier(hidden_layer_sizes=(150, 100, 50), max_iter=300, activation='relu', solver='adam', random_state=1)
+    classifier = MLPClassifier(hidden_layer_sizes=(8, 16, 8, 1), max_iter=600, activation='relu', solver='adam', random_state=1)
     classifier.fit(X_train, Y_train)
     y_pred = classifier.predict(X_val)
     if training:
         cm = confusion_matrix(y_pred, y_val)
         print("Accuracy of MLPClassifier : ", accuracy(cm))
         evaluation(y_pred, y_val)
+        res = np.column_stack((X_val, y_val, y_pred))
+        print(res.shape)
+        res_df = pd.DataFrame(data=res)
+        print(res_df)
+        res_df = res_df.rename({0: 'trip_seconds', 1: 'trip_miles', 2: 'dropoff_community_area', 3: 'fare', 4: 'payment_type', 5: 'avg_speed', 6: 'fare_per_mile', 7: 'in_rush_hour', 8: 'prediction'}, axis=1)
+        res_df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']] = sc.inverse_transform(res_df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']], copy=True)
+        res_df = res_df.astype({'in_rush_hour': bool, 'prediction': bool})
+        res_df_filtered = res_df[(res_df['in_rush_hour'] == True) & (res_df['prediction'] == False)]
+        res_df_filtered.to_csv(path_or_buf="fn.csv" )
         return y_pred
     else:
-        ids = np.arange(200001, int(200001+y_pred.shape[0]))
+        ids = np.arange(200001, int(200001+X_test.shape[0]))
         ids.astype(int)
         return np.stack((ids, y_pred))
 
@@ -229,9 +267,9 @@ def evaluation(pred, truth):
     print("TP: ", tp, " - TN: ", tn, " - FN: ", fn, " - FP: ", fp)
     print("Evaluation: ", balanced_accuracy)
 
-res = mlp(X_train, Y_train, X_val, y_val, training=False)
+res = mlp(X_train, Y_train, X_val, y_val, training=True)
 res = res.transpose()
 res = res.astype(int)
 print(res.shape)
-np.savetxt('abgabe.csv', res, delimiter=',', newline='\n', fmt='%i', header='id,prediction', comments='')
+# np.savetxt('abgabe.csv', res, delimiter=',', newline='\n', fmt='%i', header='id,prediction', comments='')
 
