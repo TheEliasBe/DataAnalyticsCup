@@ -40,7 +40,7 @@ def is_in_rush_hour(dt):
 # Load data
 cols = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "payment_type", "pickup_community_area", "dropoff_community_area", "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude"]
 df = pd.read_csv("train.csv", usecols=cols, delimiter=',')
-df = df.sample(n=150000)
+df = df.sample(n=1500)
 
 # Remove stupid character from datetime string
 df['trip_start_timestamp'] = df['trip_start_timestamp'].apply(lambda x: (x.replace('T', ' ')).replace('Z', ''))
@@ -130,6 +130,19 @@ df['payment_type'] = le.fit_transform(df['payment_type'])
 #     X_train, X_test = X[train_index], X[test_index]
 #     y_train, y_test = y[train_index], y[test_index]
 
+# load test.csv
+df_test = pd.read_csv('test.csv', usecols=cols)
+
+# compute average speed for test data
+df_test['avg_speed'] = df_test.apply(lambda row: save_division(row['trip_miles'], (row['trip_seconds']+1), 0)*3600, axis=1)
+df = df.drop(df[df['avg_speed']> 120].index)
+
+# compute fare per mile for test data
+df_test['fare_per_mile'] = df_test.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
+df_test = df_test[['trip_seconds', 'trip_miles', 'fare', 'pickup_centroid_latitude', 'pickup_centroid_longitude', 'avg_speed', 'fare_per_mile', 'payment_type']]
+print("Attributes used for testing : ", df_test.columns)
+X_test = df_test
+
 training_set, validation_set = train_test_split(df, test_size = 0.2, random_state = 21)
 X_train = training_set.iloc[:,0:-1].values
 Y_train = training_set.iloc[:,-1].values
@@ -145,15 +158,19 @@ def accuracy(confusion_matrix):
 
 
 # create the neural network classifier - returns the numpy array of predicted values
-def mlp(X_train, Y_train, X_val, y_val):
-    classifier = MLPClassifier(hidden_layer_sizes=(11,100,100,2), max_iter=300, activation = 'relu', solver='adam', random_state=1)
+def mlp(X_train, Y_train, X_val, y_val, training):
+    classifier = MLPClassifier(hidden_layer_sizes=(150, 100, 50), max_iter=300, activation='relu', solver='adam', random_state=1)
     classifier.fit(X_train, Y_train)
     y_pred = classifier.predict(X_val)
-    # print(y_pred)
-    cm = confusion_matrix(y_pred, y_val)
-    print("Accuracy of MLPClassifier : ", accuracy(cm))
-    evaluation(y_pred, y_val)
-    return y_pred
+    if training:
+        cm = confusion_matrix(y_pred, y_val)
+        print("Accuracy of MLPClassifier : ", accuracy(cm))
+        evaluation(y_pred, y_val)
+        return y_pred
+    else:
+        ids = np.arange(200001, int(200001+y_pred.shape[0]))
+        ids.astype(int)
+        return np.stack((ids, y_pred))
 
 
 # create adaboost classifier
@@ -212,6 +229,9 @@ def evaluation(pred, truth):
     print("TP: ", tp, " - TN: ", tn, " - FN: ", fn, " - FP: ", fp)
     print("Evaluation: ", balanced_accuracy)
 
-mlp(X_train, Y_train, X_val, y_val)
-gradient(X_train, Y_train, X_val, y_val)
-ada(X_train, Y_train, X_val, y_val)
+res = mlp(X_train, Y_train, X_val, y_val, training=False)
+res = res.transpose()
+res = res.astype(int)
+print(res.shape)
+np.savetxt('abgabe.csv', res, delimiter=',', newline='\n', fmt='%i', header='id,prediction', comments='')
+
