@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import  datetime
-from sklearn.preprocessing import StandardScaler, LabelEncoder, LabelBinarizer
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.preprocessing import StandardScaler, LabelBinarizer
+from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import confusion_matrix
 import numpy as np
@@ -18,7 +18,7 @@ def save_division(a, b, c):
 
 # TODO ALLE WEITERE PAYMENT TYPES HIER EINFÜGEN
 enc = LabelBinarizer()
-enc.fit(pd.DataFrame(['Cash', 'Credit Card']))
+enc.fit(pd.DataFrame(['Cash', 'Credit Card', 'Dispute', 'Mobile', 'No Charge', 'Pcard', 'Prcard', 'Prepaid', 'Unknown']))
 
 
 # Is time during rush hour?
@@ -103,9 +103,13 @@ def enhance_data(df, labelled):
         df = df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile', 'payment_type']]
 
     # TODO only remove NA values in attributes we actually need
-    print("Size before dropping all NA values: ", df.shape)
-    df = df.dropna()
-    print("Size after dropping all NA values: ", df.shape)
+    if labelled:
+        print("Size before dropping all NA values: ", df.shape)
+        df = df.dropna()
+        print("Size after dropping all NA values: ", df.shape)
+    else:
+        pass
+        df = df.fillna(0)
 
     # normalize the data. some classifier work better on normalized data
     sc = StandardScaler()
@@ -129,7 +133,7 @@ def accuracy(confusion_matrix):
 
 # create the neural network classifier - returns the numpy array of predicted values nad id when training
 def mlp(X_train, Y_train, X_test, y_val, training):
-    classifier = MLPClassifier(hidden_layer_sizes=(14, 200, 80, 1), max_iter=600, activation='relu', solver='adam', random_state=1)
+    classifier = MLPClassifier(hidden_layer_sizes=(14, 200, 80, 1), max_iter=600, activation='relu', solver='adam', random_state=2020)
     classifier.fit(X_train, Y_train)
     y_pred = classifier.predict(X_test)
     if training:
@@ -184,10 +188,13 @@ df_train = enhance_data(df_train, labelled=True)
 print("Attributes used for testing : ", df_test.columns)
 print("Learning attributes : ",  df_train.columns)
 
-training_set, validation_set = train_test_split(df_test, test_size = 0.2, random_state = 2020)
+training_set, validation_set = train_test_split(df_train, test_size = 0.05, random_state = 2020)
 X_train = training_set.iloc[:,0:-1].values
 Y_train = training_set.iloc[:,-1].values
 X_val = validation_set.iloc[:,0:-1].values
 y_val = validation_set.iloc[:,-1].values
-X_Test = np.array(df_test.to_records())
-mlp(X_train, Y_train, X_Test, None, training=False)
+X_Test = df_test.to_numpy()
+output = mlp(X_train, Y_train, X_val, y_val, training=True)
+output = np.transpose(output)
+output.astype(int)
+np.savetxt("predict.csv", output, delimiter=",", header='id, prediction', comments='', fmt='%i')
