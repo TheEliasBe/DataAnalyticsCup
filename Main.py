@@ -87,11 +87,19 @@ def enhance_data(df, labelled):
 
     # Compute average speed of trip and remove all entries above 120mph because those are very likely measurement errors
     df['avg_speed'] = df.apply(lambda row: save_division(row['trip_miles'], (row['trip_seconds']+1), 0)*3600, axis=1)
-    df = df.drop(df[df['avg_speed']> 120].index)
+
 
     # Compute fare per mile - maybe in rush hour 1 mile is more expensive, drop every fare >1000$
     df['fare_per_mile'] = df.apply(lambda row : save_division(row['fare'], row['trip_miles']+1, 0), axis=1)
-    df = df.drop(df[df['fare_per_mile'] > 1000.0].index)
+
+
+    # When training we drop outliers but on the test data we try to classify outliers
+    if labelled:
+        df = df.drop(df[df['avg_speed'] > 120].index)
+        df = df.drop(df[df['fare_per_mile'] > 500.0].index)
+    else:
+        df['avg_speed'] = df.apply(lambda row: 120 if row['avg_speed'] > 120 else row['avg_speed'], axis=1)
+        df['fare_per_mile'] = df.apply((lambda row: 500.0 if row['fare_per_mile'] > 500.0 else row['fare_per_mile']), axis=1)
 
     # Move target value in_rush_hour to the back just for consistency
     if labelled:
@@ -186,6 +194,7 @@ df_train = pd.read_csv("train.csv", usecols=cols_train, delimiter=',')
 df_test = enhance_data(df_test, labelled=False)
 df_train = enhance_data(df_train, labelled=True)
 
+df_train = df_train[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 0, 1, 2, 3, 4, 5, 6, 7, 8, 'in_rush_hour']]
 print("Attributes used for testing : ", df_test.columns)
 print("Learning attributes : ",  df_train.columns)
 
@@ -198,7 +207,7 @@ X_val = validation_set.iloc[:, 0:-1].values
 y_val = validation_set.iloc[:, -1].values
 X_Test = df_test.to_numpy()
 # Create actual output and save in predict.csv
-output = mlp(X_train, Y_train, X_val, y_val, training=True)
+output = mlp(X_train, Y_train, X_Test, y_val, training=False)
 output = np.transpose(output)
 output.astype(int)
-np.savetxt("predict.csv", output, delimiter=",", header='id, prediction', comments='', fmt='%i')
+np.savetxt("predict2.csv", output, delimiter=",", header='id, prediction', comments='', fmt='%i')
