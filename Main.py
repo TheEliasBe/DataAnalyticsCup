@@ -3,7 +3,10 @@ from datetime import datetime
 from sklearn.preprocessing import StandardScaler, LabelBinarizer
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import confusion_matrix
+from imblearn.under_sampling import RandomUnderSampler
 import numpy as np
 import geopy.distance
 
@@ -104,10 +107,10 @@ def enhance_data(df, labelled):
     # Move target value in_rush_hour to the back just for consistency
     if labelled:
         df = df.astype({'in_rush_hour': 'bool', 'payment_type': 'str'})
-        df = df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile', 'payment_type', 'in_rush_hour']]
+        df = df[['trip_seconds', 'trip_miles', 'fare', "tips", "tolls", "pickup_community_area", "dropoff_community_area", 'avg_speed', 'fare_per_mile', 'payment_type', 'in_rush_hour']]
     else:
         df = df.astype({'payment_type': 'str'})
-        df = df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile', 'payment_type']]
+        df = df[['trip_seconds', 'trip_miles', 'fare', "tips", "tolls", "pickup_community_area", "dropoff_community_area", 'avg_speed', 'fare_per_mile', 'payment_type']]
 
     if labelled:
         print("Size before dropping all NA values: ", df.shape)
@@ -119,7 +122,7 @@ def enhance_data(df, labelled):
 
     # Normalize the data as some classifier work better on normalized data
     sc = StandardScaler()
-    df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']] = sc.fit_transform(df[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 'fare_per_mile']])
+    # df[['trip_seconds', 'trip_miles', 'fare', "tips", "tolls", 'avg_speed', 'fare_per_mile']] = sc.fit_transform(df[['trip_seconds', 'trip_miles', 'fare', "tips", "tolls", 'avg_speed', 'fare_per_mile']])
 
     # One hot encode payment_type such that our neural network classifier can handle this parameter better
     # -> we found out that the correlation at first is actually small, but with this encoding we can achieve
@@ -129,6 +132,7 @@ def enhance_data(df, labelled):
     df = pd.concat([df, ohe_df], axis=1)
     df = df.drop(['payment_type', 'index'], axis=1)
 
+    df = df.astype(int)
     return df
 
 
@@ -140,8 +144,8 @@ def accuracy(confusion_matrix):
 
 
 # Create the neural network classifier - returns the numpy array of predicted values and id when training
-def mlp(X_train, Y_train, X_test, y_val, training):
-    classifier = MLPClassifier(hidden_layer_sizes=(14, 200, 80, 1), max_iter=600, activation='relu', solver='adam', random_state=2020)
+def mlp(X_train, Y_train, X_test, y_val, training=True):
+    classifier = MLPClassifier(hidden_layer_sizes=(17, 200, 80, 1), max_iter=600, activation='relu', solver='adam', random_state=2020, learning_rate='adaptive')
     classifier.fit(X_train, Y_train)
     y_pred = classifier.predict(X_test)
     if training:
@@ -156,7 +160,6 @@ def mlp(X_train, Y_train, X_test, y_val, training):
         ids = np.arange(200001, int(200001+X_test.shape[0]))
         ids.astype(int)
         return np.stack((ids, y_pred))
-
 
 # As specified we created an evaluation method based on balanced accuracy to determine how good our methods work in
 # training sessions.
@@ -186,28 +189,33 @@ def evaluation(pred, truth):
     print("Evaluation: ", balanced_accuracy)
 
 # Specify column names
-cols_train = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "payment_type", "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude"]
-cols_test = ["trip_miles", "trip_seconds", "fare", "payment_type", "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude"]
+cols_train = ["trip_start_timestamp", "trip_miles", "trip_seconds", "fare", "tips", "tolls", "extras", "payment_type", "pickup_community_area", "dropoff_community_area",  "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude"]
+cols_test = ["trip_miles", "trip_seconds", "fare", "tips", "tolls", "extras", "payment_type", "pickup_community_area", "dropoff_community_area", "pickup_centroid_latitude", "pickup_centroid_longitude", "dropoff_centroid_latitude", "dropoff_centroid_longitude"]
 # Load csv files
 df_test = pd.read_csv('test.csv', usecols=cols_test)
 df_train = pd.read_csv("train.csv", usecols=cols_train, delimiter=',')
 df_test = enhance_data(df_test, labelled=False)
 df_train = enhance_data(df_train, labelled=True)
 
-df_train = df_train[['trip_seconds', 'trip_miles', 'fare', 'avg_speed', 0, 1, 2, 3, 4, 5, 6, 7, 8, 'in_rush_hour']]
+df_train = df_train[['trip_seconds', 'trip_miles', 'fare', "tips", "tolls", "pickup_community_area", "dropoff_community_area", 'avg_speed', 'fare_per_mile', 0, 1, 2, 3, 4, 5, 6, 7, 8, 'in_rush_hour']]
 print("Attributes used for testing : ", df_test.columns)
 print("Learning attributes : ",  df_train.columns)
 
 # Here our actual work is done by calling our predefined methods.
 # We included our code used for training as small documentation of our work steps.
-training_set, validation_set = train_test_split(df_train, test_size=0.05, random_state=2020)
+training_set, validation_set = train_test_split(df_train, test_size=0.2, random_state=2020)
 X_train = training_set.iloc[:, 0:-1].values
 Y_train = training_set.iloc[:, -1].values
 X_val = validation_set.iloc[:, 0:-1].values
 y_val = validation_set.iloc[:, -1].values
+
+# because dataset is skewed, use random undersampling of majority class
+rus = RandomUnderSampler(random_state=42, sampling_strategy=0.4)
+X_res, y_res = rus.fit_resample(X_train, Y_train)
+
 X_Test = df_test.to_numpy()
 # Create actual output and save in predict.csv
-output = mlp(X_train, Y_train, X_Test, y_val, training=False)
+output = mlp(X_res, y_res, X_val, y_val)
 output = np.transpose(output)
 output.astype(int)
-np.savetxt("predict2.csv", output, delimiter=",", header='id, prediction', comments='', fmt='%i')
+np.savetxt("predict.csv", output, delimiter=",", header='id, prediction', comments='', fmt='%i')
